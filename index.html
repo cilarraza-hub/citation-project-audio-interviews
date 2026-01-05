@@ -10,6 +10,7 @@
       --text: #222;
       --muted: #555;
       --max-width: 70ch;
+      --accent: #0366d6;
     }
     html,body{height:100%}
     body {
@@ -23,7 +24,54 @@
     main { max-width: var(--max-width); }
     .muted { color: var(--muted); }
     code { background:#f4f4f4; padding:0.12em 0.25em; border-radius:4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace; }
-    audio { margin-top: 0.5rem; }
+    audio { margin-top: 0.5rem; display:block; width:100%; max-width:40rem; }
+    .file {
+      border: 1px solid #eee;
+      padding: 0.75rem;
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+      background: #fafafa;
+    }
+    .controls {
+      margin-top: 0.5rem;
+      display:flex;
+      gap:0.5rem;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    textarea.embed {
+      width:100%;
+      min-height:3.25rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", "Courier New", monospace;
+      font-size:0.9rem;
+      padding:0.5rem;
+      border-radius:6px;
+      border:1px solid #e6e6e6;
+      resize: vertical;
+    }
+    button.copy-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 0.45rem 0.65rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.copy-btn[aria-pressed="true"] {
+      background: #0b6fce;
+    }
+    .small {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .error {
+      color: #b00020;
+      background: #fff0f0;
+      padding:0.6rem;
+      border-radius:6px;
+      border:1px solid #ffd6d6;
+    }
   </style>
 </head>
 <body>
@@ -37,13 +85,16 @@
 
     <section aria-labelledby="example">
       <h2 id="example">Example audio player</h2>
-      <p class="muted">Uncomment and update the <code>src</code> attribute to load an audio file from the repository or an external URL.</p>
+      <p class="muted">Below you'll find the audio files discovered in the repository's <code>audio/</code> directory and a ready-made embed snippet you can copy into another webpage.</p>
 
-      <!-- Example:
-      <audio controls src="audio/example.mp3">
-        Your browser does not support the audio element.
-      </audio>
-      -->
+      <div id="list">
+        <p class="small muted">Loading audio files…</p>
+      </div>
+
+      <noscript>
+        <p class="muted">This page uses JavaScript to list audio files and provide copy buttons. Enable JavaScript or create static embed snippets manually using the pattern shown below.</p>
+        <pre class="small"><code>&lt;audio controls src="https://raw.githubusercontent.com/OWNER/REPO/BRANCH/audio/example.mp3"&gt;Your browser does not support the audio element.&lt;/audio&gt;</code></pre>
+      </noscript>
     </section>
 
     <section aria-labelledby="notes">
@@ -54,5 +105,140 @@
       </ul>
     </section>
   </main>
+
+  <script>
+    (async function () {
+      const owner = 'cilarraza-hub';
+      const repo = 'citation-project-audio-interviews';
+      const path = 'audio';
+      const listEl = document.getElementById('list');
+
+      function setListContent(html) {
+        listEl.innerHTML = html;
+      }
+
+      function extOf(name) {
+        const i = name.lastIndexOf('.');
+        return i >= 0 ? name.slice(i+1).toLowerCase() : '';
+      }
+
+      const audioExts = new Set(['mp3','m4a','ogg','wav','flac','aac','webm']);
+
+      try {
+        // Get default branch (safer than hardcoding 'main')
+        const repoResp = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
+        if (!repoResp.ok) throw new Error('Repository not found or GitHub API rate-limited.');
+        const repoMeta = await repoResp.json();
+        const branch = repoMeta.default_branch || 'main';
+
+        // Fetch contents of audio directory
+        const contentsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
+        const resp = await fetch(contentsUrl);
+        if (resp.status === 404) {
+          setListContent(`<div class="error"><strong>No "audio/" directory found.</strong> Create an <code>audio/</code> directory at the repository root and add files (or host externally). Then refresh this page.</div>`);
+          return;
+        }
+        if (!resp.ok) {
+          throw new Error('Error fetching audio directory: ' + resp.statusText);
+        }
+        const items = await resp.json();
+
+        const files = Array.isArray(items) ? items.filter(i => i.type === 'file' && audioExts.has(extOf(i.name))) : [];
+
+        if (files.length === 0) {
+          setListContent(`<p class="muted">No audio files found in <code>audio/</code>. Add files (mp3, m4a, ogg, wav, flac, aac, webm) and refresh.</p>`);
+          return;
+        }
+
+        // Build UI for each file
+        const container = document.createElement('div');
+        for (const file of files) {
+          const fileDiv = document.createElement('div');
+          fileDiv.className = 'file';
+
+          const title = document.createElement('div');
+          title.innerHTML = `<strong>${file.name}</strong> <span class="small muted">(${(file.size/1024).toFixed(0)} KB)</span>`;
+          fileDiv.appendChild(title);
+
+          const audio = document.createElement('audio');
+          audio.controls = true;
+          audio.src = file.download_url;
+          audio.setAttribute('preload','none');
+          fileDiv.appendChild(audio);
+
+          // Create embed HTML snippet
+          const embedHtml = `<audio controls src="${file.download_url}">Your browser does not support the audio element.</audio>`;
+
+          const controls = document.createElement('div');
+          controls.className = 'controls';
+
+          const textarea = document.createElement('textarea');
+          textarea.className = 'embed';
+          textarea.readOnly = true;
+          textarea.value = embedHtml;
+          textarea.setAttribute('aria-label', `${file.name} embed code`);
+          controls.appendChild(textarea);
+
+          const copyBtn = document.createElement('button');
+          copyBtn.className = 'copy-btn';
+          copyBtn.type = 'button';
+          copyBtn.innerText = 'Copy embed HTML';
+          copyBtn.setAttribute('aria-pressed','false');
+
+          copyBtn.addEventListener('click', async () => {
+            try {
+              await navigator.clipboard.writeText(textarea.value);
+              copyBtn.innerText = 'Copied!';
+              copyBtn.setAttribute('aria-pressed','true');
+              setTimeout(() => {
+                copyBtn.innerText = 'Copy embed HTML';
+                copyBtn.setAttribute('aria-pressed','false');
+              }, 1500);
+            } catch (err) {
+              // fallback: select and execCommand copy
+              textarea.select();
+              try {
+                document.execCommand('copy');
+                copyBtn.innerText = 'Copied!';
+                setTimeout(() => copyBtn.innerText = 'Copy embed HTML', 1500);
+              } catch (err2) {
+                alert('Copy failed — please select and copy the text manually.');
+              }
+            }
+          });
+
+          controls.appendChild(copyBtn);
+
+          // Optional: copy Markdown or a direct link
+          const copyLinkBtn = document.createElement('button');
+          copyLinkBtn.className = 'copy-btn';
+          copyLinkBtn.type = 'button';
+          copyLinkBtn.style.background = '#24a148';
+          copyLinkBtn.innerText = 'Copy direct URL';
+          copyLinkBtn.addEventListener('click', async () => {
+            const text = file.download_url;
+            try {
+              await navigator.clipboard.writeText(text);
+              copyLinkBtn.innerText = 'Copied!';
+              setTimeout(() => copyLinkBtn.innerText = 'Copy direct URL', 1500);
+            } catch (err) {
+              prompt('Copy the URL:', text);
+            }
+          });
+          controls.appendChild(copyLinkBtn);
+
+          fileDiv.appendChild(controls);
+          container.appendChild(fileDiv);
+        }
+
+        listEl.innerHTML = '';
+        listEl.appendChild(container);
+
+      } catch (err) {
+        console.error(err);
+        setListContent(`<div class="error"><strong>Error:</strong> ${String(err.message || err)}</div>`);
+      }
+    })();
+  </script>
 </body>
 </html>
